@@ -11,6 +11,11 @@ REPORT_GAS=true npx hardhat test
 npx hardhat node
 npx hardhat ignition deploy ./ignition/modules/Lock.js
 ```
+'''deploy to docker
+git pull
+docker-compose build
+docker-compose up -d
+'''
 
 ```
 npx hardhat console --network localhost

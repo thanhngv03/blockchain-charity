@@ -10,61 +10,55 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-type DonationTx struct {
-	TxHash      string
-	From        string
-	AmountWei   *big.Int
-	BlockNumber uint64
-}
-
-func VerifyDonationTx(txHash string, contractAddr common.Address) (*DonationTx, error) {
-
-	client, err := ethclient.Dial("http://127.0.0.1:8545")
-	if err != nil {
-		return nil, err
-	}
+func VerifyDonateTx(
+	client *ethclient.Client,
+	txHash string,
+	expectedContract common.Address,
+) (common.Address, *big.Int, error) {
 
 	ctx := context.Background()
+	hash := common.HexToHash(txHash)
 
-	tx, isPending, err := client.TransactionByHash(ctx, common.HexToHash(txHash))
+	// 1. Lấy transaction
+	tx, ísPending, err := client.TransactionByHash(ctx, hash)
 	if err != nil {
-		return nil, err
+		return common.Address{}, nil, err
 	}
-	if isPending {
-		return nil, errors.New("transaction pending")
+	if ísPending {
+		return common.Address{}, nil, errors.New("transaction is still pending")
 	}
 
-	receipt, err := client.TransactionReceipt(ctx, tx.Hash())
+	// 2. Lấy receipt
+	receipt, err := client.TransactionReceipt(ctx, hash)
 	if err != nil {
-		return nil, err
+		return common.Address{}, nil, err
 	}
-
 	if receipt.Status != types.ReceiptStatusSuccessful {
-		return nil, errors.New("transaction failed")
+		return common.Address{}, nil, errors.New("receipt status is not successful")
 	}
 
-	// 1️⃣ Check gửi đến CharityVault
-	if tx.To() == nil || *tx.To() != contractAddr {
-		return nil, errors.New("transaction not sent to CharityVault")
+	// Verify gui toi CharityVault
+	if tx.To() == nil || *tx.To() != expectedContract {
+		return common.Address{}, nil, errors.New("tx not sent to CharityVault")
 	}
 
-	// 2️⃣ Lấy chainID để recover sender
+	// Lay amount
+	amount := tx.Value()
+	if amount.Cmp(big.NewInt(0)) <= 0 {
+		return common.Address{}, nil, errors.New("donation amount must be greater than zero")
+	}
+
+	// 5. Lấy donor (from)
 	chainID, err := client.NetworkID(ctx)
 	if err != nil {
-		return nil, err
+		return common.Address{}, nil, err
 	}
 
 	signer := types.LatestSignerForChainID(chainID)
-
 	from, err := types.Sender(signer, tx)
 	if err != nil {
-		return nil, err
+		return common.Address{}, nil, err
 	}
 
-	return &DonationTx{
-		TxHash:      txHash,
-		From:        from.Hex(),
-		AmountWei:   tx.Value(),
-		BlockNumber: receipt.BlockNumber.Uint64(),
-	}, nil
+	return from, amount, nil
 }
