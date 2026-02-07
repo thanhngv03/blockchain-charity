@@ -20,11 +20,11 @@ func VerifyDonateTx(
 	hash := common.HexToHash(txHash)
 
 	// 1. Lấy transaction
-	tx, ísPending, err := client.TransactionByHash(ctx, hash)
+	tx, isPending, err := client.TransactionByHash(ctx, hash)
 	if err != nil {
 		return common.Address{}, nil, err
 	}
-	if ísPending {
+	if isPending {
 		return common.Address{}, nil, errors.New("transaction is still pending")
 	}
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/thanhngv03/decentralized-charity-fund/charity-backend-go/handlers"
 	"github.com/thanhngv03/decentralized-charity-fund/charity-backend-go/services"
 	"github.com/thanhngv03/decentralized-charity-fund/charity-backend-go/utils"
 )
@@ -78,6 +79,9 @@ func main() {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
+		// Project
+		http.HandleFunc("/api/projects", handlers.GetProjects)
 
 		// Save DB
 		_, err = utils.DB.ExecContext(
