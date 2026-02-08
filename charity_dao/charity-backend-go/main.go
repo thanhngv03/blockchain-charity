@@ -80,9 +80,6 @@ func main() {
 			return
 		}
 
-		// Project
-		http.HandleFunc("/api/projects", handlers.GetProjects)
-
 		// Save DB
 		_, err = utils.DB.ExecContext(
 			context.Background(),
@@ -102,7 +99,11 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{
 			"status": "success",
 		})
+
 	})
+
+	// Project
+	http.HandleFunc("/api/projects", handlers.GetProjectsHandler)
 
 	// 6. Start server
 	fmt.Println("Backend running at http://localhost:3000")
