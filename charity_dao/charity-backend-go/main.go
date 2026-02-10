@@ -105,6 +105,10 @@ func main() {
 	// Project
 	http.HandleFunc("/api/projects", handlers.GetProjectsHandler)
 
+	//Admin
+	http.HandleFunc("/api/admin/projects", handlers.CreateProjectHandler)
+	http.HandleFunc("/api/admin/projects/update", handlers.UpdateProjectHandler)
+
 	// 6. Start server
 	fmt.Println("Backend running at http://localhost:3000")
 	log.Fatal(http.ListenAndServe(":3000", nil))
