@@ -10,6 +10,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/rs/cors"
 	"github.com/thanhngv03/decentralized-charity-fund/charity-backend-go/handlers"
 	"github.com/thanhngv03/decentralized-charity-fund/charity-backend-go/services"
 	"github.com/thanhngv03/decentralized-charity-fund/charity-backend-go/utils"
@@ -106,10 +107,12 @@ func main() {
 	http.HandleFunc("/api/projects", handlers.GetProjectsHandler)
 
 	//Admin
-	http.HandleFunc("/api/admin/projects", handlers.CreateProjectHandler)
+	http.HandleFunc("/api/admin/projects", handlers.CheckAdmin(handlers.CreateProjectHandler))
 	http.HandleFunc("/api/admin/projects/update", handlers.UpdateProjectHandler)
 
+	handler := cors.Default().Handler(http.DefaultServeMux)
+
 	// 6. Start server
-	fmt.Println("Backend running at http://localhost:3000")
-	log.Fatal(http.ListenAndServe(":3000", nil))
+	fmt.Println("Backend running at http://localhost:8080")
+	log.Fatal(http.ListenAndServe(":8080", handler))
 }
