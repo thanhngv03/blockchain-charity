@@ -1,0 +1,1 @@
+{"id":"log_check_admin","timestamp":0,"location":"project_admin_handler.go:CheckAdmin","message":"CheckAdmin called","data":{"path":"/api/admin/projects"},"runId":"compile_fix","hypothesisId":"H1"}
