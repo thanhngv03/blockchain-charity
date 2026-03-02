@@ -105,12 +105,19 @@ func main() {
 
 	// Project
 	http.HandleFunc("/api/projects", handlers.GetProjectsHandler)
-
-	//Admin
-	http.HandleFunc("/api/admin/projects", handlers.CheckAdmin(handlers.CreateProjectHandler))
+	http.HandleFunc("/api/admin/projects", handlers.CreateProjectHandler)
 	http.HandleFunc("/api/admin/projects/update", handlers.UpdateProjectHandler)
 
-	handler := cors.Default().Handler(http.DefaultServeMux)
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:3000"}, // Cho phép React App
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Origin", "Content-Type", "Authorization", "wallet_address"},
+		AllowCredentials: true,
+		Debug:            true, // Bật cái này để bạn xem log CORS trong terminal Go
+	})
+
+	// Áp dụng cấu hình vào handler
+	handler := c.Handler(http.DefaultServeMux)
 
 	// 6. Start server
 	fmt.Println("Backend running at http://localhost:8080")

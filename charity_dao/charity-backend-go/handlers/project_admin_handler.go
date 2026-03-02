@@ -3,91 +3,120 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"os"
+	"strings"
 
-	"github.com/thanhngv03/decentralized-charity-fund/charity-backend-go/services"
 	"github.com/thanhngv03/decentralized-charity-fund/charity-backend-go/utils"
 )
+
+// DTO (Data Transfer Object) để nhận request từ Client
+type CreateProjectRequest struct {
+	Title         string `json:"title"`
+	CategoryID    int    `json:"category_id"` // Thay đổi thành int (FK)
+	Description   string `json:"description"`
+	CreatorWallet string `json:"creator_wallet"` // Địa chỉ ví đăng nhập
+
+	// Beneficiary Info
+	BeneficiaryName    string                 `json:"beneficiary_name"`
+	BeneficiaryContact string                 `json:"beneficiary_contact"`
+	IDFiles            map[string]interface{} `json:"id_files"` // Nhận dạng JSON Object
+
+	// Address
+	Address  string `json:"address"`
+	District string `json:"district"`
+	Province string `json:"province"`
+
+	// Blockchain & Finance
+	TargetAmount      float64 `json:"target_amount"`   // Đổi thành số thực (Decimal trong DB)
+	NetworkTypeID     int     `json:"network_type_id"` // FK
+	ReceiverWallet    string  `json:"receiver_wallet"`
+	PayoutConditionID int     `json:"payout_condition_id"` // FK
+
+	// Media
+	Links map[string]interface{} `json:"links,omitempty"` // Link ảnh mô tả
+}
 
 func CreateProjectHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", 405)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var body struct {
-		Title           string `json:"title"`
-		Description     string `json:"description"`
-		TargetAmountWei string `json:"target_amount_wei"`
-		Category        string `json:"category"`
-		StartDate       string `json:"start_date"`
-		EndDate         string `json:"end_date"`
-		WalletAddress   string `json:"wallet_address"`
-		OwnerName       string `json:"owner_name"`
-		OwnerEmail      string `json:"owner_email"`
-		OwnerPhone      string `json:"owner_phone"`
-	}
-
+	var body CreateProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "Invalid body", 400)
+		http.Error(w, "Invalid body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// DEPLOY SMART CONTRACT
-	contractAddress, err := services.DeployProjectContract(body.TargetAmountWei)
+	// Chuyển đổi JSONB
+	idFilesJSON, _ := json.Marshal(body.IDFiles)
+	linksJSON, _ := json.Marshal(body.Links)
+
+	/* Deploy contract
+	targetAmountStr := strconv.FormatFloat(body.TargetAmount, 'f', -1, 64)
+	contractAddress, err := services.DeployProjectContract(targetAmountStr)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		http.Error(w, "Failed to deploy contract: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	*/
 
-	// ===== 2️⃣ INSERT INTO DATABASE =====
-	_, err = utils.DB.Exec(`
-		INSERT INTO projects
-		(title, description, target_amount_wei, category,
-		 wallet_address, start_date, end_date,
-		 owner_name, owner_email, owner_phone,
-		 collected_amount_wei, status, approved)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,'calling',false)
-	`,
-		body.Title,
-		body.Description,
-		body.TargetAmountWei,
-		body.Category,
-		contractAddress.Hex(),
-		body.StartDate,
-		body.EndDate,
-		body.OwnerName,
-		body.OwnerEmail,
-		body.OwnerPhone,
-	)
+	tempContractAddress := "0x0000000000000000000000000000000000000000"
+
+	// ===== SQL ĐÃ LOẠI BỎ is_private_docs VÀ KHỚP 17 THAM SỐ =====
+	query := `
+        INSERT INTO projects (
+            title, category_id, description, creator_wallet,
+            beneficiary_name, beneficiary_contact, id_files,
+            address, district, province,
+            target_amount, network_type_id, receiver_wallet, payout_condition_id, 
+            contract_address, status, links
+        ) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) 
+        RETURNING id`
+
+	var newProjectID string
+	// Truyền chính xác 17 biến tương ứng với $1 -> $17
+	var err error
+	err = utils.DB.QueryRow(query,
+		body.Title,              // $1
+		body.CategoryID,         // $2
+		body.Description,        // $3
+		body.CreatorWallet,      // $4
+		body.BeneficiaryName,    // $5
+		body.BeneficiaryContact, // $6
+		string(idFilesJSON),     // $7
+		body.Address,            // $8
+		body.District,           // $9
+		body.Province,           // $10
+		body.TargetAmount,       // $11
+		body.NetworkTypeID,      // $12
+		body.ReceiverWallet,     // $13
+		body.PayoutConditionID,  // $14
+		tempContractAddress,     // Thay contractAddress.Hex() bằng biến tạm này
+		0,
+		string(linksJSON),
+	).Scan(&newProjectID)
 
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		// Trả về lỗi chi tiết để Frontend hiển thị
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	json.NewEncoder(w).Encode(map[string]string{
-		"message":          "Project created successfully",
-		"contract_address": contractAddress.Hex(),
+		"message":    "Project created successfully",
+		"project_id": newProjectID,
 	})
 }
 
-// CheckAdmin là một phần mềm trung gian đơn giản để bảo vệ các điểm cuối của quản trị viên.
-// về sau mở rộng sau này để thực hiện xác thực/ủy quyền thực sự.
-func CheckAdmin(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// #region agent log
-		f, err := os.OpenFile("debug-f07305.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err == nil {
-			_, _ = f.WriteString(`{"id":"log_check_admin","timestamp":0,"location":"project_admin_handler.go:CheckAdmin","message":"CheckAdmin called","data":{"path":"` + r.URL.Path + `"},"runId":"compile_fix","hypothesisId":"H1"}` + "\n")
-			_ = f.Close()
-		}
-		// #endregion agent log
+// -------------------------------------------------------------
 
-		// TODO: add real admin checks here (e.g., headers, tokens)
-		next.ServeHTTP(w, r)
-	}
+type UpdateProjectRequest struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Status      int    `json:"status"` // Sửa thành INT cho khớp Database mới
 }
 
 func UpdateProjectHandler(w http.ResponseWriter, r *http.Request) {
@@ -98,40 +127,38 @@ func UpdateProjectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Lấy id từ query ?id=1
+	// Lấy id từ query ?id=UUID
 	id := r.URL.Query().Get("id")
-	if id == "" {
+	if strings.TrimSpace(id) == "" {
 		http.Error(w, "Missing project id", http.StatusBadRequest)
 		return
 	}
 
-	var body struct {
-		Title       string `json:"title"`
-		Description string `json:"description"`
-		Status      string `json:"status"`
-	}
-
+	var body UpdateProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		http.Error(w, "Invalid JSON body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	_, err := utils.DB.Exec(`
-		UPDATE projects
-		SET title=$1,
-		    description=$2,
-		    status=$3,
-		    updated_at=NOW()
-		WHERE id=$4
-	`,
-		body.Title,
-		body.Description,
-		body.Status,
-		id,
-	)
+	// Câu lệnh UPDATE trỏ đúng các trường trong Database
+	query := `
+		UPDATE projects 
+		SET title = $1, 
+			description = $2, 
+			status = $3, 
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = $4
+	`
+	res, err := utils.DB.Exec(query, body.Title, body.Description, body.Status, id)
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		http.Error(w, "Project not found", http.StatusNotFound)
 		return
 	}
 
