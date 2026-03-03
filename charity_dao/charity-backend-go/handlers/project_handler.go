@@ -1,5 +1,6 @@
 package handlers
 
+// Hiển thị dữ liệu lên Dashboard
 import (
 	"encoding/json"
 	"net/http"
@@ -8,32 +9,26 @@ import (
 )
 
 type Project struct {
-	ID                 int    `json:"id"`
-	Title              string `json:"title"`
-	Description        string `json:"description"`
-	TargetAmountWei    string `json:"target_amount_wei"`
-	CollectedAmountWei string `json:"collected_amount_wei"`
-	Status             string `json:"status"`
-	CreatedAt          string `json:"created_at"`
-	UpdatedAt          string `json:"updated_at"`
+	ID              string  `json:"id"`
+	Title           string  `json:"title"`
+	Description     string  `json:"description"`
+	TargetAmount    float64 `json:"target_amount_wei"` // Map về tên FE đang dùng
+	CollectedAmount float64 `json:"collected_amount_wei"`
+	Status          string  `json:"status"` // Chúng ta sẽ convert số sang chữ ở đây
+	CreatedAt       string  `json:"created_at"`
 }
 
 func GetProjectsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+	// Query đúng các cột có trong image_6dc97f.png
 	rows, err := utils.DB.Query(`
-		SELECT id, title, description, target_amount_wei,
-		       collected_amount_wei, status, created_at, updated_at
-		FROM projects
-		ORDER BY created_at DESC
-	`)
+        SELECT id, title, description, target_amount, status, created_at 
+        FROM projects 
+        ORDER BY created_at DESC
+    `)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		http.Error(w, "Database error: "+err.Error(), 500)
 		return
 	}
 	defer rows.Close()
@@ -42,19 +37,26 @@ func GetProjectsHandler(w http.ResponseWriter, r *http.Request) {
 
 	for rows.Next() {
 		var p Project
-		if err := rows.Scan(
-			&p.ID,
-			&p.Title,
-			&p.Description,
-			&p.TargetAmountWei,
-			&p.CollectedAmountWei,
-			&p.Status,
-			&p.CreatedAt,
-			&p.UpdatedAt,
-		); err != nil {
-			http.Error(w, err.Error(), 500)
+		var statusInt int
+
+		// Scan khớp với các cột trong DB (id là uuid, status là int4)
+		if err := rows.Scan(&p.ID, &p.Title, &p.Description, &p.TargetAmount, &statusInt, &p.CreatedAt); err != nil {
+			http.Error(w, "Scan error: "+err.Error(), 500)
 			return
 		}
+
+		switch statusInt {
+		case 0:
+			p.Status = "calling"
+		case 1:
+			p.Status = "pending"
+		case 2:
+			p.Status = "completed"
+		default:
+			p.Status = "calling"
+		}
+		// Giả định collected_amount = 0 nếu bạn chưa làm logic tính toán từ contract
+		p.CollectedAmount = 0
 		projects = append(projects, p)
 	}
 

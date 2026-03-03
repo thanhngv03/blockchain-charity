@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 	"os"
 
@@ -20,9 +21,18 @@ func DeployProjectContract(targetWei string) (common.Address, error) {
 		return common.Address{}, err
 	}
 
-	privateKey, err := crypto.HexToECDSA(os.Getenv("PRIVATE_KEY"))
+	rawKey := os.Getenv("PRIVATE_KEY")
+	if rawKey == "" {
+		return common.Address{}, fmt.Errorf("PRIVATE_KEY environment variable not set in .env")
+	}
+
+	if len(rawKey) >= 2 && rawKey[:2] == "0x" {
+		rawKey = rawKey[2:]
+	}
+
+	privateKey, err := crypto.HexToECDSA(rawKey)
 	if err != nil {
-		return common.Address{}, err
+		return common.Address{}, fmt.Errorf("invalid key: %v (length: %d)", err, len(rawKey))
 	}
 
 	publicKey := privateKey.Public()

@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/thanhngv03/decentralized-charity-fund/charity-backend-go/utils"
 )
@@ -62,7 +64,7 @@ func CreateProjectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	*/
 
-	tempContractAddress := "0x0000000000000000000000000000000000000000"
+	tempContractAddress := fmt.Sprintf("0x00000000000000000000000000000000000%d", time.Now().Unix())
 
 	// ===== SQL ĐÃ LOẠI BỎ is_private_docs VÀ KHỚP 17 THAM SỐ =====
 	query := `
