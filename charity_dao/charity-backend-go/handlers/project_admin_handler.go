@@ -3,7 +3,11 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +19,7 @@ type CreateProjectRequest struct {
 	Title         string `json:"title"`
 	CategoryID    int    `json:"category_id"` // Thay đổi thành int (FK)
 	Description   string `json:"description"`
+	Image         string `json:"image"`          // Link ảnh mô tả
 	CreatorWallet string `json:"creator_wallet"` // Địa chỉ ví đăng nhập
 
 	// Beneficiary Info
@@ -37,76 +42,115 @@ type CreateProjectRequest struct {
 	Links map[string]interface{} `json:"links,omitempty"` // Link ảnh mô tả
 }
 
-func CreateProjectHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+func saveUploadedFile(r *http.Request, formKey string) (string, error) {
+	file, handler, err := r.FormFile(formKey)
+	if err != nil {
+		if err == http.ErrMissingFile {
+			return "", nil // Không có file cũng không sao (nếu không bắt buộc)
+		}
+		return "", err
+	}
+	defer file.Close()
 
+	// Tạo thư mục uploads nếu chưa có
+	err = os.MkdirAll("uploads", os.ModePerm)
+	if err != nil {
+		return "", err
+	}
+
+	// Tạo tên file duy nhất để tránh trùng lặp
+	fileName := fmt.Sprintf("%d_%s", time.Now().UnixNano(), handler.Filename)
+	filePath := filepath.Join("uploads", fileName)
+
+	// Tạo file trên server
+	dst, err := os.Create(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer dst.Close()
+
+	// Copy nội dung vào file
+	if _, err := io.Copy(dst, file); err != nil {
+		return "", err
+	}
+
+	// Trả về đường dẫn tĩnh (để frontend có thể hiển thị)
+	return "/uploads/" + fileName, nil
+}
+
+func CreateProjectHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var body CreateProjectRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "Invalid body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Chuyển đổi JSONB
-	idFilesJSON, _ := json.Marshal(body.IDFiles)
-	linksJSON, _ := json.Marshal(body.Links)
-
-	/* Deploy contract
-	targetAmountStr := strconv.FormatFloat(body.TargetAmount, 'f', -1, 64)
-	contractAddress, err := services.DeployProjectContract(targetAmountStr)
+	// 1. Phân tích multipart form (giới hạn 10MB)
+	err := r.ParseMultipartForm(10 << 20)
 	if err != nil {
-		http.Error(w, "Failed to deploy contract: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Error parsing form data: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	*/
 
+	// 2. Lấy các trường text từ Form
+	title := r.FormValue("title")
+	categoryID, _ := strconv.Atoi(r.FormValue("category_id"))
+	description := r.FormValue("description")
+	creatorWallet := r.FormValue("creator_wallet")
+	beneficiaryName := r.FormValue("beneficiary_name")
+	beneficiaryContact := r.FormValue("beneficiary_contact")
+	address := r.FormValue("address")
+	district := r.FormValue("district")
+	province := r.FormValue("province")
+	targetAmount, _ := strconv.ParseFloat(r.FormValue("target_amount"), 64)
+	networkTypeID, _ := strconv.Atoi(r.FormValue("network_type_id"))
+	receiverWallet := r.FormValue("receiver_wallet")
+	payoutConditionID, _ := strconv.Atoi(r.FormValue("payout_condition_id"))
+
+	// 3. Xử lý lưu File
+	imagePath, err := saveUploadedFile(r, "image")
+	if err != nil {
+		http.Error(w, "Failed to save image: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	idFilesPath, err := saveUploadedFile(r, "id_files")
+	if err != nil {
+		http.Error(w, "Failed to save ID files: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Tạo JSON tĩnh cho các trường map (nếu cần)
+	idFilesJSON := fmt.Sprintf(`{"status": "uploaded", "url": "%s"}`, idFilesPath)
+	linksJSON := `{}`
 	tempContractAddress := fmt.Sprintf("0x00000000000000000000000000000000000%d", time.Now().Unix())
 
-	// ===== SQL ĐÃ LOẠI BỎ is_private_docs VÀ KHỚP 17 THAM SỐ =====
+	// 4. Lưu vào Database
 	query := `
-        INSERT INTO projects (
-            title, category_id, description, creator_wallet,
-            beneficiary_name, beneficiary_contact, id_files,
-            address, district, province,
-            target_amount, network_type_id, receiver_wallet, payout_condition_id, 
-            contract_address, status, links
-        ) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) 
-        RETURNING id`
+		INSERT INTO projects (
+			title, category_id, description, creator_wallet, image,
+			beneficiary_name, beneficiary_contact, id_files,
+			address, district, province,
+			target_amount, network_type_id, receiver_wallet, payout_condition_id, 
+			contract_address, status, links
+		) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) 
+		RETURNING id`
 
 	var newProjectID string
-	// Truyền chính xác 17 biến tương ứng với $1 -> $17
-	var err error
 	err = utils.DB.QueryRow(query,
-		body.Title,              // $1
-		body.CategoryID,         // $2
-		body.Description,        // $3
-		body.CreatorWallet,      // $4
-		body.BeneficiaryName,    // $5
-		body.BeneficiaryContact, // $6
-		string(idFilesJSON),     // $7
-		body.Address,            // $8
-		body.District,           // $9
-		body.Province,           // $10
-		body.TargetAmount,       // $11
-		body.NetworkTypeID,      // $12
-		body.ReceiverWallet,     // $13
-		body.PayoutConditionID,  // $14
-		tempContractAddress,     // Thay contractAddress.Hex() bằng biến tạm này
-		0,
-		string(linksJSON),
+		title, categoryID, description, creatorWallet, imagePath,
+		beneficiaryName, beneficiaryContact, idFilesJSON,
+		address, district, province,
+		targetAmount, networkTypeID, receiverWallet, payoutConditionID,
+		tempContractAddress, 0, linksJSON,
 	).Scan(&newProjectID)
 
 	if err != nil {
-		// Trả về lỗi chi tiết để Frontend hiển thị
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"message":    "Project created successfully",
 		"project_id": newProjectID,
@@ -118,6 +162,7 @@ func CreateProjectHandler(w http.ResponseWriter, r *http.Request) {
 type UpdateProjectRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
+	Image       string `json:"image"`
 	Status      int    `json:"status"` // Sửa thành INT cho khớp Database mới
 }
 
@@ -147,11 +192,12 @@ func UpdateProjectHandler(w http.ResponseWriter, r *http.Request) {
 		UPDATE projects 
 		SET title = $1, 
 			description = $2, 
-			status = $3, 
+			image = $3,
+			status = $4, 
 			updated_at = CURRENT_TIMESTAMP
-		WHERE id = $4
+		WHERE id = $5
 	`
-	res, err := utils.DB.Exec(query, body.Title, body.Description, body.Status, id)
+	res, err := utils.DB.Exec(query, body.Title, body.Description, body.Image, body.Status, id)
 
 	if err != nil {
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
@@ -166,5 +212,42 @@ func UpdateProjectHandler(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Project updated successfully",
+	})
+}
+
+// ===== HÀM XÓA DỰ ÁN (TỪ CHỐI) =====
+func DeleteProjectHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Chỉ chấp nhận method DELETE
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Lấy id từ query ?id=UUID
+	id := r.URL.Query().Get("id")
+	if strings.TrimSpace(id) == "" {
+		http.Error(w, "Missing project id", http.StatusBadRequest)
+		return
+	}
+
+	// Lệnh SQL xóa vĩnh viễn khỏi Database
+	query := `DELETE FROM projects WHERE id = $1`
+	res, err := utils.DB.Exec(query, id)
+
+	if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Project deleted successfully",
 	})
 }

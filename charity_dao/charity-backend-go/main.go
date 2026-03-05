@@ -106,6 +106,8 @@ func main() {
 	// Project
 	http.HandleFunc("/api/projects", handlers.GetProjectsHandler)
 	http.HandleFunc("/api/admin/projects", handlers.CreateProjectHandler)
+	http.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
+	http.HandleFunc("/api/admin/projects/delete", handlers.DeleteProjectHandler)
 	http.HandleFunc("/api/admin/projects/update", handlers.UpdateProjectHandler)
 
 	c := cors.New(cors.Options{
