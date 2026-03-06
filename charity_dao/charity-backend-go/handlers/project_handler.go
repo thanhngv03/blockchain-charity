@@ -2,6 +2,7 @@ package handlers
 
 // Hiển thị dữ liệu lên Dashboard
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -10,13 +11,20 @@ import (
 )
 
 type Project struct {
-	ID              string  `json:"id"`
-	Title           string  `json:"title"`
-	Description     string  `json:"description"`
-	TargetAmount    float64 `json:"target_amount_wei"` // Map về tên FE đang dùng
-	CollectedAmount float64 `json:"collected_amount_wei"`
-	Status          string  `json:"status"` // Chúng ta sẽ convert số sang chữ ở đây
-	CreatedAt       string  `json:"created_at"`
+	ID                 string  `json:"id"`
+	Title              string  `json:"title"`
+	Description        string  `json:"description"`
+	TargetAmount       float64 `json:"target_amount_wei"`
+	CollectedAmount    float64 `json:"collected_amount_wei"`
+	Status             string  `json:"status"`
+	CreatedAt          string  `json:"created_at"`
+	Image              string  `json:"image"`
+	IdFiles            string  `json:"id_files"`
+	BeneficiaryName    string  `json:"beneficiary_name"`
+	BeneficiaryContact string  `json:"beneficiary_contact"`
+	Province           string  `json:"province"`
+	District           string  `json:"district"`
+	Address            string  `json:"address"`
 }
 
 func GetProjectsHandler(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +41,8 @@ func GetProjectsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Xây dựng câu lệnh SQL động
 	query := `
-        SELECT id, title, description, target_amount, status, created_at 
+        SELECT id, title, description, target_amount, status, created_at, image
+		, id_files, beneficiary_name, beneficiary_contact, province, district, address 
         FROM projects 
         WHERE 1=1
     `
@@ -66,11 +75,23 @@ func GetProjectsHandler(w http.ResponseWriter, r *http.Request) {
 		var p Project
 		var statusInt int
 
-		if err := rows.Scan(&p.ID, &p.Title, &p.Description, &p.TargetAmount, &statusInt, &p.CreatedAt); err != nil {
+		var image, id_files, beneficiary_name, beneficiary_contact, province, district, address sql.NullString
+
+		if err := rows.Scan(
+			&p.ID, &p.Title, &p.Description, &p.TargetAmount, &statusInt, &p.CreatedAt,
+			&image, &id_files, &beneficiary_name, &beneficiary_contact, &province, &district, &address,
+		); err != nil {
 			http.Error(w, "Scan error: "+err.Error(), 500)
 			return
 		}
 
+		p.Image = image.String
+		p.IdFiles = id_files.String
+		p.BeneficiaryName = beneficiary_name.String
+		p.BeneficiaryContact = beneficiary_contact.String
+		p.Province = province.String
+		p.District = district.String
+		p.Address = address.String
 		// QUY ƯỚC TRẠNG THÁI MỚI:
 		// 0 = Chờ duyệt (pending)
 		// 1 = Đang kêu gọi (calling) - Đã được Admin duyệt

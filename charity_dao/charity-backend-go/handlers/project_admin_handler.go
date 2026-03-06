@@ -107,6 +107,7 @@ func CreateProjectHandler(w http.ResponseWriter, r *http.Request) {
 	payoutConditionID, _ := strconv.Atoi(r.FormValue("payout_condition_id"))
 
 	// 3. Xử lý lưu File
+	// 3. Xử lý lưu File
 	imagePath, err := saveUploadedFile(r, "image")
 	if err != nil {
 		http.Error(w, "Failed to save image: "+err.Error(), http.StatusInternalServerError)
@@ -119,27 +120,29 @@ func CreateProjectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Tạo JSON tĩnh cho các trường map (nếu cần)
-	idFilesJSON := fmt.Sprintf(`{"status": "uploaded", "url": "%s"}`, idFilesPath)
-	linksJSON := `{}`
+	// --- ĐOẠN SỬA LẠI ĐỂ DỮ LIỆU SẠCH ---
+	// Thay vì bọc JSON rác, chúng ta chỉ lưu đường dẫn thuần túy.
+	// Nếu sau này muốn lưu nhiều ảnh, có thể nối chuỗi bằng dấu phẩy.
+	cleanIDFiles := idFilesPath
+	linksJSON := "{}" // Giữ nguyên nếu bạn chưa dùng đến
 	tempContractAddress := fmt.Sprintf("0x00000000000000000000000000000000000%d", time.Now().Unix())
 
 	// 4. Lưu vào Database
 	query := `
-		INSERT INTO projects (
-			title, category_id, description, creator_wallet, image,
-			beneficiary_name, beneficiary_contact, id_files,
-			address, district, province,
-			target_amount, network_type_id, receiver_wallet, payout_condition_id, 
-			contract_address, status, links
-		) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) 
-		RETURNING id`
+        INSERT INTO projects (
+            title, category_id, description, creator_wallet, image,
+            beneficiary_name, beneficiary_contact, id_files,
+            address, district, province,
+            target_amount, network_type_id, receiver_wallet, payout_condition_id, 
+            contract_address, status, links
+        ) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) 
+        RETURNING id`
 
 	var newProjectID string
 	err = utils.DB.QueryRow(query,
 		title, categoryID, description, creatorWallet, imagePath,
-		beneficiaryName, beneficiaryContact, idFilesJSON,
+		beneficiaryName, beneficiaryContact, cleanIDFiles, // Sử dụng biến đã làm sạch ở đây
 		address, district, province,
 		targetAmount, networkTypeID, receiverWallet, payoutConditionID,
 		tempContractAddress, 0, linksJSON,
