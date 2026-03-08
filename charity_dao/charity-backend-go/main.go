@@ -109,6 +109,8 @@ func main() {
 	http.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
 	http.HandleFunc("/api/admin/projects/delete", handlers.DeleteProjectHandler)
 	http.HandleFunc("/api/admin/projects/update", handlers.UpdateProjectHandler)
+	http.HandleFunc("/api/donations/history", handlers.GetDonationsHistoryHandler)
+	http.HandleFunc("/api/donations/create", handlers.CreateDonationHandler)
 
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:3000"}, // Cho phép React App
