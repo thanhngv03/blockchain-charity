@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/thanhngv03/decentralized-charity-fund/charity-backend-go/utils"
@@ -34,38 +35,56 @@ func CreateDonationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Xử lý tên mặc định nếu user ẩn danh
 	if input.DonorName == "" {
 		input.DonorName = "Nhà hảo tâm"
 	}
 
-	// --- BƯỚC 1: LƯU LỊCH SỬ QUYÊN GÓP CÙNG TX_HASH ---
+	// --- BƯỚC 1: LƯU LỊCH SỬ QUYÊN GÓP ---
 	queryInsert := `
         INSERT INTO donations (project_id, donor_wallet, donor_name, message, amount_wei, tx_hash)
         VALUES ($1, $2, $3, $4, $5, $6)
     `
 	_, err := utils.DB.Exec(queryInsert, input.ProjectID, input.DonorWallet, input.DonorName, input.Message, input.Amount, input.TxHash)
 	if err != nil {
+		// Log lỗi chi tiết ra Terminal để bạn dễ theo dõi
+		fmt.Printf("❌ Lỗi INSERT donations: %v\n", err)
 		http.Error(w, "Lỗi lưu database lịch sử: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// --- BƯỚC 2: CẬP NHẬT TỔNG TIỀN VÀ LƯỢT QUYÊN GÓP CHO DỰ ÁN ---
-	// Dùng COALESCE để nếu raised_amount hoặc donation_count đang là NULL thì gán bằng 0 trước khi cộng
-	queryUpdate := `
-        UPDATE projects 
-        SET raised_amount = COALESCE(raised_amount, 0) + $1,
-            donation_count = COALESCE(donation_count, 0) + 1
-        WHERE id = $2
-    `
-	_, err = utils.DB.Exec(queryUpdate, input.Amount, input.ProjectID)
+	// --- BƯỚC 2: CẬP NHẬT TỔNG TIỀN, LƯỢT QUYÊN GÓP VÀ TỰ ĐỘNG ĐÓNG DỰ ÁN ---
+	// Đoạn này sử dụng Incremental Update (cộng dồn) cực kỳ tối ưu
+	queryUpdateProject := `
+			UPDATE projects 
+			SET 
+				raised_amount = COALESCE(raised_amount, 0) + $1, 
+				donation_count = COALESCE(donation_count, 0) + 1,
+				-- Tự động chuyển status sang 3 (Completed) nếu đạt mục tiêu
+				status = CASE 
+							WHEN (COALESCE(raised_amount, 0) + $1) >= target_amount THEN 3 
+							ELSE status 
+						END
+			WHERE id = $2
+		`
+
+	result, err := utils.DB.Exec(queryUpdateProject, input.Amount, input.ProjectID)
 	if err != nil {
-		http.Error(w, "Lỗi cập nhật số liệu dự án: "+err.Error(), http.StatusInternalServerError)
-		return
+		// Nếu lỗi ở đây, chúng ta log lỗi nhưng không ngắt tiến trình vì tiền đã vào bảng donations rồi
+		fmt.Printf("❌ Lỗi cập nhật bảng projects: %v\n", err)
+	} else {
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected > 0 {
+			fmt.Printf("✅ Đã cập nhật số liệu cho dự án %s thành công!\n", input.ProjectID)
+		}
 	}
 
+	// Kiểm tra xem có dòng nào được cập nhật không
+	rowsAffected, _ := result.RowsAffected()
+	fmt.Printf("✅ Quyên góp thành công! Dự án ID: %s, Số tiền: %f, Rows affected: %d\n", input.ProjectID, input.Amount, rowsAffected)
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"message": "Ghi nhận quyên góp và cập nhật dự án thành công!"})
+	json.NewEncoder(w).Encode(map[string]string{"message": "Ghi nhận quyên góp thành công!"})
 }
 
 // 2. HÀM LẤY LỊCH SỬ QUYÊN GÓP (GET)

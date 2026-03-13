@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/thanhngv03/decentralized-charity-fund/charity-backend-go/utils"
+
 )
 
 type Project struct {
@@ -28,106 +29,119 @@ type Project struct {
 	ReceiverWallet     string  `json:"receiver_wallet"`
 	NetworkTypeID      string  `json:"network_type_id"`
 	NetworkName        string  `json:"network_name"`
+	EndDate            string  `json:"end_date"`
 }
 
 func GetProjectsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+    w.Header().Set("Content-Type", "application/json")
 
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+    if r.Method != http.MethodGet {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
 
-	walletParam := r.URL.Query().Get("wallet")
-	statusParam := r.URL.Query().Get("status")
+    // 1. TỰ ĐỘNG CẬP NHẬT TRẠNG THÁI HẾT HẠN TRƯỚC KHI LẤY DỮ LIỆU
+    updateExpiryQuery := `
+        UPDATE projects 
+        SET status = 3 
+        WHERE status = 1 
+          AND end_date IS NOT NULL 
+          AND end_date < CURRENT_TIMESTAMP
+    `
+    utils.DB.Exec(updateExpiryQuery)
 
-	// CẬP NHẬT CÂU LỆNH SQL:
-	// 1. JOIN với bảng networks (giả định bảng tên là networks)
-	// 2. Dùng Subquery để tính COUNT và SUM từ bảng donations
-	query := `
-		SELECT 
-			p.id, p.title, p.description, p.target_amount, p.status, p.created_at, p.image,
-			p.id_files, p.beneficiary_name, p.beneficiary_contact, p.province, p.district, p.address,
-			p.receiver_wallet, 
-			n.network_name, -- Lấy tên mạng từ bảng networks
-			(SELECT COUNT(*) FROM donations d WHERE d.project_id = p.id) as donation_count,
-			(SELECT COALESCE(SUM(amount_wei), 0) FROM donations d WHERE d.project_id = p.id) as raised_amount
-		FROM projects p
-		LEFT JOIN networks n ON p.network_type_id = n.id -- Thực hiện JOIN
-		WHERE 1=1
-	`
-	var args []interface{}
-	argId := 1
+    walletParam := r.URL.Query().Get("wallet")
+    statusParam := r.URL.Query().Get("status")
 
-	if walletParam != "" {
-		query += ` AND LOWER(p.creator_wallet) = LOWER($` + strconv.Itoa(argId) + `)`
-		args = append(args, walletParam)
-		argId++
-	}
+    // 2. CÂU LỆNH SELECT (Tổng cộng 18 cột - Đã đánh số để bạn dễ kiểm tra)
+    query := `
+        SELECT 
+            p.id, p.title, p.description, p.target_amount, p.status, -- 1,2,3,4,5
+            p.created_at, p.image, p.id_files, p.beneficiary_name, p.beneficiary_contact, -- 6,7,8,9,10
+            p.province, p.district, p.address, p.receiver_wallet, -- 11,12,13,14
+            n.network_name, -- 15
+            (SELECT COUNT(*) FROM donations d WHERE d.project_id = p.id) as donation_count, -- 16
+            (SELECT COALESCE(SUM(amount_wei), 0) FROM donations d WHERE d.project_id = p.id) as raised_amount, -- 17
+            p.end_date -- 18 (CỘT MỚI THÊM)
+        FROM projects p
+        LEFT JOIN networks n ON p.network_type_id = n.id
+        WHERE 1=1
+    `
+    
+    var args []interface{}
+    argId := 1
+    if walletParam != "" {
+        query += ` AND LOWER(p.creator_wallet) = LOWER($` + strconv.Itoa(argId) + `)`
+        args = append(args, walletParam)
+        argId++
+    }
+    if statusParam != "" {
+        query += ` AND p.status = $` + strconv.Itoa(argId)
+        args = append(args, statusParam)
+        argId++
+    }
+    query += ` ORDER BY p.created_at DESC`
 
-	if statusParam != "" {
-		query += ` AND p.status = $` + strconv.Itoa(argId)
-		args = append(args, statusParam)
-		argId++
-	}
+    rows, err := utils.DB.Query(query, args...)
+    if err != nil {
+        http.Error(w, "Database error: "+err.Error(), 500)
+        return
+    }
+    defer rows.Close()
 
-	query += ` ORDER BY p.created_at DESC`
+    var projects []Project
+    for rows.Next() {
+        var p Project
+        var statusInt int
+        // Dùng NullString/NullTime để tránh lỗi khi dữ liệu trong DB bị trống (NULL)
+        var image, idFiles, bName, bContact, prov, dist, addr, rWallet, nName sql.NullString
+        var endDate sql.NullTime // Cần dùng NullTime cho cột TIMESTAMP
 
-	rows, err := utils.DB.Query(query, args...)
-	if err != nil {
-		http.Error(w, "Database error: "+err.Error(), 500)
-		return
-	}
-	defer rows.Close()
+        // 3. HÀM SCAN (Phải đủ 18 biến và đúng thứ tự với SELECT ở trên)
+        err := rows.Scan(
+            &p.ID, &p.Title, &p.Description, &p.TargetAmount, &statusInt, // 1,2,3,4,5
+            &p.CreatedAt, &image, &idFiles, &bName, &bContact, // 6,7,8,9,10
+            &prov, &dist, &addr, &rWallet, // 11,12,13,14
+            &nName, // 15
+            &p.DonationCount, // 16
+            &p.CollectedAmount, // 17
+            &endDate, // 18 (BIẾN MỚI THÊM)
+        )
+        
+        if err != nil {
+            // Nếu vẫn lỗi, nó sẽ in ra lỗi cụ thể ở đây (ví dụ: expected 18 arguments, got 17)
+            http.Error(w, "Scan error: "+err.Error(), 500)
+            return
+        }
 
-	var projects []Project
-	for rows.Next() {
-		var p Project
-		var statusInt int
-		// Khai báo các biến NullString để xử lý dữ liệu trống
-		var image, id_files, beneficiary_name, beneficiary_contact, province, district, address, receiver_wallet, network_name sql.NullString
+        // Gán lại dữ liệu từ Null types sang Project struct
+        p.Image = image.String
+        p.IdFiles = idFiles.String
+        p.BeneficiaryName = bName.String
+        p.BeneficiaryContact = bContact.String
+        p.Province = prov.String
+        p.District = dist.String
+        p.Address = addr.String
+        p.ReceiverWallet = rWallet.String
+        p.NetworkName = nName.String
+        
+        if endDate.Valid {
+            p.EndDate = endDate.Time.Format("2006-01-02 15:04:05")
+        } else {
+            p.EndDate = "" // Nếu chưa có hạn thì để trống
+        }
 
-		// THỨ TỰ TRONG SCAN PHẢI KHỚP 100% VỚI SELECT TRÊN
-		err := rows.Scan(
-			&p.ID, &p.Title, &p.Description, &p.TargetAmount, &statusInt, &p.CreatedAt, &image,
-			&id_files, &beneficiary_name, &beneficiary_contact, &province, &district, &address,
-			&receiver_wallet,
-			&network_name,
-			&p.DonationCount,
-			&p.CollectedAmount,
-		)
-		if err != nil {
-			http.Error(w, "Scan error: "+err.Error(), 500)
-			return
-		}
+        // Logic hiển thị trạng thái chữ
+        switch statusInt {
+        case 0: p.Status = "pending"
+        case 1: p.Status = "calling"
+        case 2: p.Status = "paused"
+        case 3: p.Status = "completed"
+        default: p.Status = "pending"
+        }
 
-		// Gán lại giá trị từ NullString sang String
-		p.Image = image.String
-		p.IdFiles = id_files.String
-		p.BeneficiaryName = beneficiary_name.String
-		p.BeneficiaryContact = beneficiary_contact.String
-		p.Province = province.String
-		p.District = district.String
-		p.Address = address.String
-		p.ReceiverWallet = receiver_wallet.String
-		p.NetworkName = network_name.String
+        projects = append(projects, p)
+    }
 
-		// Xử lý logic hiển thị trạng thái
-		switch statusInt {
-		case 0:
-			p.Status = "pending"
-		case 1:
-			p.Status = "calling"
-		case 2:
-			p.Status = "paused" // Theo yêu cầu Tạm dừng ở tin nhắn trước
-		case 3:
-			p.Status = "completed"
-		default:
-			p.Status = "pending"
-		}
-
-		projects = append(projects, p)
-	}
-
-	json.NewEncoder(w).Encode(projects)
+    json.NewEncoder(w).Encode(projects)
 }

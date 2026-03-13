@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/thanhngv03/decentralized-charity-fund/charity-backend-go/utils"
-
 )
 
 // DTO (Data Transfer Object) để nhận request từ Client
@@ -191,16 +190,23 @@ func UpdateProjectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Câu lệnh UPDATE trỏ đúng các trường trong Database
+	// ĐOẠN ĐƯỢC NÂNG CẤP: Thêm logic tự động set end_date = 1 tháng
+	// Sử dụng CASE WHEN của PostgreSQL:
+	// Nếu status = 1 (Đang kêu gọi) VÀ end_date đang trống -> Set hạn 1 tháng.
+	// Nếu không (ví dụ Admin bấm tạm dừng), giữ nguyên end_date cũ.
 	query := `
-		UPDATE projects 
-		SET title = $1, 
-			description = $2, 
-			image = $3,
-			status = $4, 
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = $5
-	`
+        UPDATE projects 
+        SET title = $1, 
+            description = $2, 
+            image = $3,
+            status = $4, 
+            end_date = CASE 
+                        WHEN $4 = 1 AND end_date IS NULL THEN CURRENT_TIMESTAMP + INTERVAL '1 month'
+                        ELSE end_date 
+                       END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $5
+    `
 	res, err := utils.DB.Exec(query, body.Title, body.Description, body.Image, body.Status, id)
 
 	if err != nil {
@@ -215,7 +221,7 @@ func UpdateProjectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Project updated successfully",
+		"message": "Project updated successfully (Set 1 month deadline if approved)",
 	})
 }
 
