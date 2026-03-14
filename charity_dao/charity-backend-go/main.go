@@ -113,9 +113,10 @@ func main() {
 	http.HandleFunc("/api/donations/create", handlers.CreateDonationHandler)
 	http.HandleFunc("/api/news", handlers.GetNewsFeed) // GET
 
-	http.HandleFunc("/api/news/create", handlers.CreateNewsPost)  // POST (Nên bảo vệ bằng check Admin)
+	http.HandleFunc("/api/news/create", handlers.CreateNewsPost)  // POST (Cần thêm bảo vệ bằng check Admin)
 	http.HandleFunc("/api/news/like", handlers.ToggleLikeNews)    // POST
 	http.HandleFunc("/api/news/comment", handlers.AddNewsComment) // POST
+	http.HandleFunc("/api/news/comments", handlers.GetNewsComments)
 
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:3000"}, // Cho phép React App

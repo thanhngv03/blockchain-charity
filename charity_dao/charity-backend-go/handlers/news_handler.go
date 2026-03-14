@@ -118,3 +118,37 @@ func CreateNewsPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"post_id": id})
 }
+
+// API 5: Lấy danh sách bình luận của 1 bài post
+func GetNewsComments(w http.ResponseWriter, r *http.Request) {
+	postID := r.URL.Query().Get("post_id")
+	if postID == "" {
+		http.Error(w, "Thiếu post_id", http.StatusBadRequest)
+		return
+	}
+
+	query := `
+        SELECT id, news_post_id, wallet_address, content, created_at 
+        FROM news_comments 
+        WHERE news_post_id = $1 
+        ORDER BY created_at ASC
+    `
+	rows, err := utils.DB.Query(query, postID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var comments []models.NewsComment
+	for rows.Next() {
+		var c models.NewsComment
+		err := rows.Scan(&c.ID, &c.NewsPostID, &c.WalletAddress, &c.Content, &c.CreatedAt)
+		if err == nil {
+			comments = append(comments, c)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(comments)
+}
